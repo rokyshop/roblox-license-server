@@ -345,6 +345,22 @@ app.get("/health", (req, res) => {
     res.json({ status: "online", timestamp: Date.now() });
 });
 
+
+// TEMPORAIRE : corriger la base
+app.get("/fixdb", async (req, res) => {
+    try {
+        await pool.query(`ALTER TABLE licenses ADD COLUMN IF NOT EXISTS unauthorized_attempts TEXT DEFAULT '[]';`);
+        await pool.query(`ALTER TABLE licenses ADD COLUMN IF NOT EXISTS banned_until BIGINT;`);
+        await pool.query(`ALTER TABLE licenses ADD COLUMN IF NOT EXISTS created_at BIGINT;`);
+        await pool.query(`ALTER TABLE licenses ADD COLUMN IF NOT EXISTS allowed_ids TEXT;`);
+
+        res.send("Database fixed!");
+    } catch (err) {
+        res.send("Error: " + err.message);
+    }
+});
+
+
 // ==========================
 // DÉMARRAGE
 // ==========================
