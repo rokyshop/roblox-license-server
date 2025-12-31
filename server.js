@@ -33,6 +33,23 @@ async function initDatabase() {
 
 initDatabase();
 
+
+
+
+app.get("/addlicense", async (req, res) => {
+    await pool.query(`
+        INSERT INTO licenses (license, owner_id, allowed_ids, last_used, attempts, banned_until)
+        VALUES ('ABC123-XYZ789', 123456789, '["123456789"]', NULL, 0, NULL)
+        ON CONFLICT (license) DO NOTHING;
+    `);
+
+    res.send("License added");
+});
+
+
+
+
+
 // Vérification HMAC
 function verifyHMAC(license, userid, timestamp, signature) {
     const message = license + userid + timestamp;
