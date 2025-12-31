@@ -368,29 +368,14 @@ app.get("/fixdb", async (req, res) => {
 async function start() {
     await initDatabase();
 
-    // ❌ TEMPORAIRE : on désactive le chargement du fichier
-    // await loadLicensesFromFile();
+     await loadLicensesFromFile();
 
     console.log("⚠️ loadLicensesFromFile() désactivé temporairement");
 
     app.listen(3000, () => console.log("Server running on port 3000"));
 }
 
-// ==========================
-// ENDPOINT TEMPORAIRE POUR RÉPARER LA BASE
-// ==========================
-app.get("/fixdb", async (req, res) => {
-    try {
-        await pool.query(`ALTER TABLE licenses ADD COLUMN IF NOT EXISTS unauthorized_attempts TEXT DEFAULT '[]';`);
-        await pool.query(`ALTER TABLE licenses ADD COLUMN IF NOT EXISTS banned_until BIGINT;`);
-        await pool.query(`ALTER TABLE licenses ADD COLUMN IF NOT EXISTS created_at BIGINT;`);
-        await pool.query(`ALTER TABLE licenses ADD COLUMN IF NOT EXISTS allowed_ids TEXT;`);
 
-        res.send("Database fixed!");
-    } catch (err) {
-        res.send("Error: " + err.message);
-    }
-});
 
 start().catch(err => {
     console.error("Erreur au démarrage:", err);
