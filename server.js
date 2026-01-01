@@ -81,12 +81,13 @@ setInterval(cleanNonces, 60 * 1000);
 // ==========================
 // HMAC (ROBLOX SAFE)
 // ==========================
-function generateHMAC(license, userid, timestamp, nonce) {
+function generateSignature(license, userid, timestamp, nonce) {
 	return crypto
-		.createHmac("sha256", SECRET_KEY)
-		.update(`${license}${userid}${timestamp}${nonce}`)
-		.digest("hex"); // STRING HEX
+		.createHash("sha256")
+		.update(SECRET_KEY + `${license}${userid}${timestamp}${nonce}`)
+		.digest("hex");
 }
+
 
 // ==========================
 // VERIFY
@@ -126,7 +127,7 @@ app.post("/verify", async (req, res) => {
 	recentNonces.set(license, nonceMap);
 
 	// HMAC CHECK (STRING === STRING)
-	const expected = generateHMAC(license, userid, timestamp, nonce);
+	const expected = generateSignature(license, userid, timestamp, nonce);
 	if (signature !== expected) {
 		return res.status(401).json({ status: "invalid", reason: "bad_signature" });
 	}
