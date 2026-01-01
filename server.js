@@ -50,6 +50,23 @@ const recentNonces = new Map();
 const rateLimitIP = new Map();
 const rateLimitLicense = new Map();
 
+
+const crypto = require("crypto");
+
+function sign(secret, message) {
+	return crypto
+		.createHash("sha256")
+		.update(secret + message)
+		.digest("hex");
+}
+
+const expected = sign(SECRET_KEY, license + userid + timestamp + nonce);
+
+if (signature !== expected) {
+	return res.json({ status: "invalid" });
+}
+
+
 function checkRateLimit(map, key, max, windowMs) {
 	const now = Date.now();
 	const entry = map.get(key);
