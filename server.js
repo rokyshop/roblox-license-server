@@ -20,11 +20,31 @@ const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_PER_LICENSE = 30;
 const RATE_LIMIT_MAX_PER_IP = 60;
 
+// 🔔 WEBHOOK DISCORD - METTEZ VOTRE URL ICI
+const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/VOTRE_WEBHOOK_ID/VOTRE_WEBHOOK_TOKEN";
+
 // PostgreSQL (Render)
 const pool = new Pool({
 	connectionString: process.env.DATABASE_URL,
 	ssl: { rejectUnauthorized: false }
 });
+
+// ==========================
+// FONCTION WEBHOOK DISCORD
+// ==========================
+async function sendDiscordAlert(message) {
+	try {
+		await fetch(DISCORD_WEBHOOK_URL, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				content: message
+			})
+		});
+	} catch (error) {
+		console.error("Erreur webhook Discord:", error);
+	}
+}
 
 // ==========================
 // DB INIT
@@ -49,9 +69,6 @@ async function initDatabase() {
 const recentNonces = new Map();
 const rateLimitIP = new Map();
 const rateLimitLicense = new Map();
-
-
-
 
 function checkRateLimit(map, key, max, windowMs) {
 	const now = Date.now();
@@ -88,7 +105,6 @@ function generateSignature(license, userid, timestamp, nonce) {
 		.digest("hex");
 }
 
-
 // ==========================
 // VERIFY
 // ==========================
@@ -97,13 +113,11 @@ app.post("/verify", async (req, res) => {
 		req.headers["x-forwarded-for"]?.split(",")[0] ||
 		req.socket.remoteAddress;
 
-const { license, userid, timestamp, nonce } = req.body;
+	const { license, userid, timestamp, nonce } = req.body;
 
-
-if (!license || !userid || !timestamp || !nonce) {
-	return res.status(400).json({ status: "invalid", reason: "missing_params" });
-}
-
+	if (!license || !userid || !timestamp || !nonce) {
+		return res.status(400).json({ status: "invalid", reason: "missing_params" });
+	}
 
 	// Rate limit
 	if (!checkRateLimit(rateLimitIP, ip, RATE_LIMIT_MAX_PER_IP, RATE_LIMIT_WINDOW_MS)) {
@@ -163,6 +177,9 @@ if (!license || !userid || !timestamp || !nonce) {
 		return res.json({ status: "valid" });
 	}
 
+	// 🚨 TENTATIVE NON AUTORISÉE - ALERTE DISCORD
+	await sendDiscordAlert(`⚠️ **Tentative non autorisée**\n📝 License: \`${license}\`\n👤 UserID: \`${userid}\`\n🌐 IP: \`${ip}\``);
+
 	if (!unauthorized.includes(uid)) unauthorized.push(uid);
 
 	if (unauthorized.length >= MAX_UNAUTHORIZED_IDS) {
@@ -170,6 +187,9 @@ if (!license || !userid || !timestamp || !nonce) {
 			"UPDATE licenses SET unauthorized_attempts=$1, banned_until=$2 WHERE license=$3",
 			[JSON.stringify(unauthorized), nowMs + BAN_DURATION_MS, license]
 		);
+
+		// 🚨 BAN - ALERTE DISCORD
+		await sendDiscordAlert(`🔴 **LICENSE BANNIE**\n📝 License: \`${license}\`\n⏰ Durée: 48h\n👥 IDs non autorisés: ${unauthorized.length}`);
 
 		return res.status(403).json({
 			status: "invalid",
@@ -191,4 +211,6 @@ if (!license || !userid || !timestamp || !nonce) {
 // ==========================
 app.get("/health", (_, res) => res.json({ status: "ok" }));
 
-app.listen(3000, () => console.log("Server running on 3000"));
+initDatabase().then(() => {
+	app.listen(3000, () => console.log("Server running on 3000"));
+});
