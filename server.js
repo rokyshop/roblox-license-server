@@ -173,11 +173,14 @@ app.post("/verify", async (req, res) => {
 	if (Math.abs(now - Number(timestamp)) > MAX_TIME_DRIFT_SEC) {
 
 	    // 🔥 WEBHOOK : TIMESTAMP EXPIRÉ
- 	   sendDiscordAlert(`⏰ Timestamp invalide / expiré
+	sendDiscordAlert(`⏰ Timestamp invalide / expiré
 	📝 License: \`${license}\`
 	👤 UserID: \`${userid}\`
+	🌐 IP: \`${ip}\`
+	`);
 
- 	   return res.status(401).json({ status: "invalid", reason: "expired" });
+		return res.status(401).json({ status: "invalid", reason: "expired" });
+
 	}
 
 
@@ -186,12 +189,14 @@ app.post("/verify", async (req, res) => {
 	if (nonceMap.has(nonce)) {
 
   	  // 🔥 WEBHOOK : REPLAY ATTACK
-	  sendDiscordAlert(`🔁 Replay attack détectée
+	sendDiscordAlert(`🔁 Replay attack détectée
 	📝 License: \`${license}\`
 	👤 UserID: \`${userid}\`
+	🌐 IP: \`${ip}\`
+	`);
 
-	    return res.status(401).json({ status: "invalid", reason: "replay" });
-	}
+	return res.status(401).json({ status: "invalid", reason: "replay" });
+
 
 	nonceMap.set(nonce, Date.now());
 	recentNonces.set(license, nonceMap);
