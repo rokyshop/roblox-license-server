@@ -2,7 +2,6 @@ import express from "express";
 import crypto from "crypto";
 import fs from "fs";
 import pkg from "pg";
-import fetch from "node-fetch";
 
 const { Pool } = pkg;
 
@@ -13,11 +12,9 @@ app.use(express.json());
 // CONFIG
 // ==========================
 const SECRET_KEY = "rREd764dJYU7665dsfEF";
-const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 const MAX_TIME_DRIFT_SEC = 300;
 const MAX_UNAUTHORIZED_IDS = 3;
 const BAN_DURATION_MS = 48 * 60 * 60 * 1000;
-const TAMPER_SECRET = process.env.TAMPER_SECRET;
 
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_PER_LICENSE = 30;
@@ -54,28 +51,6 @@ const rateLimitIP = new Map();
 const rateLimitLicense = new Map();
 
 
-async function sendDiscordAlert(title, description, fields = []) {
-	if (!DISCORD_WEBHOOK_URL) return;
-
-	try {
-		await fetch(DISCORD_WEBHOOK_URL, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				username: "Roblox License Guard",
-				embeds: [{
-					title,
-					description,
-					color: 0xff5555,
-					timestamp: new Date().toISOString(),
-					fields
-				}]
-			})
-		});
-	} catch (err) {
-		console.error("Discord alert failed:", err);
-	}
-}
 
 
 function checkRateLimit(map, key, max, windowMs) {
@@ -159,42 +134,21 @@ if (!license || !userid || !timestamp || !nonce) {
 		[license]
 	);
 
-if (!result.rows.length) {
-	await sendDiscordAlert(
-		"❌ Unknown license",
-		"License not found in database",
-		[
-			{ name: "License", value: license },
-			{ name: "UserId", value: userid },
-			{ name: "IP", value: ip }
-		]
-	);
-
-	return res.status(404).json({ status: "invalid", reason: "unknown_license" });
-}
-
+	if (!result.rows.length) {
+		return res.status(404).json({ status: "invalid", reason: "unknown_license" });
+	}
 
 	const data = result.rows[0];
 	const nowMs = Date.now();
 
-if (data.banned_until && data.banned_until > nowMs) {
-	await sendDiscordAlert(
-		"🔒 Banned license used",
-		"Attempt to use a banned license",
-		[
-			{ name: "License", value: license },
-			{ name: "UserId", value: userid },
-			{ name: "Ban until", value: new Date(data.banned_until).toISOString() }
-		]
-	);
-
-	return res.status(403).json({
-		status: "invalid",
-		reason: "banned",
-		until: data.banned_until
-	});
-}
-
+	// Ban check
+	if (data.banned_until && data.banned_until > nowMs) {
+		return res.status(403).json({
+			status: "invalid",
+			reason: "banned",
+			until: data.banned_until
+		});
+	}
 
 	const allowed = JSON.parse(data.allowed_ids || "[]").map(Number);
 	const uid = Number(userid);
@@ -209,30 +163,9 @@ if (data.banned_until && data.banned_until > nowMs) {
 		return res.json({ status: "valid" });
 	}
 
-await sendDiscordAlert(
-	"⚠️ Unauthorized user",
-	"User tried to use a license they are not allowed on",
-	[
-		{ name: "License", value: license },
-		{ name: "UserId", value: userid },
-		{ name: "Allowed IDs", value: allowed.join(", ") || "None" }
-	]
-);
-
-if (!unauthorized.includes(uid)) {
-	unauthorized.push(uid);
-}
+	if (!unauthorized.includes(uid)) unauthorized.push(uid);
 
 	if (unauthorized.length >= MAX_UNAUTHORIZED_IDS) {
-		await sendDiscordAlert(
-	"🚨 License auto-banned",
-	"Too many unauthorized users on one license",
-	[
-		{ name: "License", value: license },
-		{ name: "Users", value: unauthorized.join(", ") }
-	]
-);
-
 		await pool.query(
 			"UPDATE licenses SET unauthorized_attempts=$1, banned_until=$2 WHERE license=$3",
 			[JSON.stringify(unauthorized), nowMs + BAN_DURATION_MS, license]
@@ -254,28 +187,6 @@ if (!unauthorized.includes(uid)) {
 		reason: "userid_not_allowed"
 	});
 });
-
-
-app.post("/tamper", async (req, res) => {
-	const { license, reason, placeId, secret } = req.body;
-
-	if (secret !== TAMPER_SECRET) {
-		return res.status(403).json({ status: "invalid" });
-	}
-
-	await sendDiscordAlert(
-		"🧨 Script tampering detected",
-		"Roblox script modification detected",
-		[
-			{ name: "License", value: license },
-			{ name: "Reason", value: reason },
-			{ name: "PlaceId", value: String(placeId) }
-		]
-	);
-
-	res.json({ status: "logged" });
-});
-
 
 // ==========================
 app.get("/health", (_, res) => res.json({ status: "ok" }));
