@@ -1,7 +1,7 @@
 import express from "express";
 import crypto from "crypto";
 import pkg from "pg";
-import https from "https";  // ← Module natif Node.js
+import https from "https";
 
 const { Pool } = pkg;
 
@@ -30,7 +30,7 @@ const pool = new Pool({
 });
 
 // ==========================
-// FONCTION WEBHOOK DISCORD (HTTPS NATIF)
+// FONCTION WEBHOOK DISCORD (CORRIGÉE)
 // ==========================
 function sendDiscordAlert(message) {
 	const data = JSON.stringify({ content: message });
@@ -39,22 +39,32 @@ function sendDiscordAlert(message) {
 	
 	const options = {
 		hostname: url.hostname,
-		path: url.pathname,
+		path: url.pathname + url.search,  // ← CORRECTION ICI
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
-			"Content-Length": data.length
+			"Content-Length": Buffer.byteLength(data)  // ← CORRECTION ICI AUSSI
 		}
 	};
 
 	console.log("📤 Envoi webhook Discord...");
+	console.log("🔍 URL:", url.hostname + url.pathname);
 	
 	const req = https.request(options, (res) => {
-		if (res.statusCode === 204 || res.statusCode === 200) {
-			console.log("✅ Webhook Discord envoyé !");
-		} else {
-			console.error("❌ Erreur webhook:", res.statusCode);
-		}
+		let responseData = "";
+		
+		res.on("data", (chunk) => {
+			responseData += chunk;
+		});
+		
+		res.on("end", () => {
+			if (res.statusCode === 204 || res.statusCode === 200) {
+				console.log("✅ Webhook Discord envoyé avec succès !");
+			} else {
+				console.error("❌ Erreur webhook:", res.statusCode);
+				console.error("Réponse:", responseData);
+			}
+		});
 	});
 
 	req.on("error", (error) => {
