@@ -97,11 +97,13 @@ app.post("/verify", async (req, res) => {
 		req.headers["x-forwarded-for"]?.split(",")[0] ||
 		req.socket.remoteAddress;
 
-	const { license, userid, timestamp, nonce, signature } = req.body;
+const { license, userid, timestamp, nonce } = req.body;
 
-	if (!license || !userid || !timestamp || !nonce || !signature) {
-		return res.status(400).json({ status: "invalid", reason: "missing_params" });
-	}
+
+if (!license || !userid || !timestamp || !nonce) {
+	return res.status(400).json({ status: "invalid", reason: "missing_params" });
+}
+
 
 	// Rate limit
 	if (!checkRateLimit(rateLimitIP, ip, RATE_LIMIT_MAX_PER_IP, RATE_LIMIT_WINDOW_MS)) {
@@ -125,12 +127,6 @@ app.post("/verify", async (req, res) => {
 	}
 	nonceMap.set(nonce, Date.now());
 	recentNonces.set(license, nonceMap);
-
-	// HMAC CHECK (STRING === STRING)
-	const expected = generateSignature(license, userid, timestamp, nonce);
-	if (signature !== expected) {
-		return res.status(401).json({ status: "invalid", reason: "bad_signature" });
-	}
 
 	// License lookup
 	const result = await pool.query(
