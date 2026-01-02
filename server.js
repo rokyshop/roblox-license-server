@@ -202,32 +202,16 @@ app.post("/verify", async (req, res) => {
 		[license]
 	);
 
-	if (!result.rows.length) {
+if (!result.rows.length) {
 
-	    // 🔥 WEBHOOK : LICENSE INCONNUE
-	sendDiscordAlert(
-	`🚨 **ALERTE SÉCURITÉ**
-	----------------------------------
-	📝 **License**: \`${license}\`
-	👤 **UserID**: \`${userid}\`
-	🌐 **IP**: \`${ip}\`
+    // 🔥 WEBHOOK : LICENSE INCONNUE
+    sendDiscordAlert(`❌ License inconnue
+📝 License: \`${license}\`
+👤 UserID: \`${userid}\`
 
-	⏱️ **Timestamp reçu**: \`${timestamp}\`
-	⏱️ **Timestamp serveur**: \`${now}\`
-	📉 **Différence**: \`${Math.abs(now - Number(timestamp))} sec\`
+    return res.status(404).json({ status: "invalid", reason: "unknown_license" });
+}
 
-	🔑 **Nonce**: \`${nonce}\`
-
-	📌 **Tentatives non autorisées**: 0
-	📌 **Liste IDs non autorisés**: Aucun
-
-	⚠️ **Raison**: \`unknown_license\`
-	----------------------------------
-	`
-	);
-
-  	  return res.status(404).json({ status: "invalid", reason: "unknown_license" });
-	}
 
 
 	const data = result.rows[0];
