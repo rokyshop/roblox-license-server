@@ -159,8 +159,16 @@ app.post("/verify", async (req, res) => {
 	// Timestamp
 	const now = Math.floor(Date.now() / 1000);
 	if (Math.abs(now - Number(timestamp)) > MAX_TIME_DRIFT_SEC) {
-		return res.status(401).json({ status: "invalid", reason: "expired" });
+
+	    // 🔥 WEBHOOK : TIMESTAMP EXPIRÉ
+ 	   sendDiscordAlert(`⏰ Timestamp invalide / expiré
+	📝 License: \`${license}\`
+	👤 UserID: \`${userid}\`
+	🌐 IP: \`${ip}\``);
+
+ 	   return res.status(401).json({ status: "invalid", reason: "expired" });
 	}
+
 
 	// Anti replay
 	const nonceMap = recentNonces.get(license) || new Map();
@@ -177,8 +185,16 @@ app.post("/verify", async (req, res) => {
 	);
 
 	if (!result.rows.length) {
-		return res.status(404).json({ status: "invalid", reason: "unknown_license" });
+
+	    // 🔥 WEBHOOK : LICENSE INCONNUE
+	    sendDiscordAlert(`❌ License inconnue
+	📝 License: \`${license}\`
+	👤 UserID: \`${userid}\`
+	🌐 IP: \`${ip}\``);
+
+  	  return res.status(404).json({ status: "invalid", reason: "unknown_license" });
 	}
+
 
 	const data = result.rows[0];
 	const nowMs = Date.now();
@@ -202,13 +218,13 @@ if (allowed.includes(uid)) {
         [Math.floor(nowMs / 1000), license]
     );
 
-    sendDiscordAlert(`🟢 License valide
-📝 License: \`${license}\`
-👤 UserID: \`${userid}\`
-🌐 IP: \`${ip}\``);
+   	 sendDiscordAlert(`🟢 License valide
+	📝 License: \`${license}\`
+	👤 UserID: \`${userid}\`
+	🌐 IP: \`${ip}\``);
 
-    return res.json({ status: "valid" });
-}
+ 	   return res.json({ status: "valid" });
+	}
 
 	// 🚨 TENTATIVE NON AUTORISÉE - ALERTE DISCORD
 	console.log("⚠️ Tentative non autorisée détectée - envoi webhook...");
