@@ -164,7 +164,6 @@ app.post("/verify", async (req, res) => {
  	   sendDiscordAlert(`⏰ Timestamp invalide / expiré
 	📝 License: \`${license}\`
 	👤 UserID: \`${userid}\`
-	🌐 IP: \`${ip}\``);
 
  	   return res.status(401).json({ status: "invalid", reason: "expired" });
 	}
@@ -190,7 +189,6 @@ app.post("/verify", async (req, res) => {
 	    sendDiscordAlert(`❌ License inconnue
 	📝 License: \`${license}\`
 	👤 UserID: \`${userid}\`
-	🌐 IP: \`${ip}\``);
 
   	  return res.status(404).json({ status: "invalid", reason: "unknown_license" });
 	}
@@ -221,7 +219,6 @@ if (allowed.includes(uid)) {
    	 sendDiscordAlert(`🟢 License valide
 	📝 License: \`${license}\`
 	👤 UserID: \`${userid}\`
-	🌐 IP: \`${ip}\``);
 
  	   return res.json({ status: "valid" });
 	}
