@@ -205,7 +205,7 @@ app.post("/verify", async (req, res) => {
 	if (!result.rows.length) {
 
 	    // 🔥 WEBHOOK : LICENSE INCONNUE
-		sendDiscordAlert(
+	sendDiscordAlert(
 	`🚨 **ALERTE SÉCURITÉ**
 	----------------------------------
 	📝 **License**: \`${license}\`
