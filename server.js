@@ -2,10 +2,6 @@ import express from "express";
 import crypto from "crypto";
 import fs from "fs";
 import pkg from "pg";
-import fetch from "node-fetch"; // ajouter si pas déjà importé
-
-const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL; // ton webhook
-
 
 const { Pool } = pkg;
 
@@ -82,37 +78,6 @@ function cleanNonces() {
 }
 setInterval(cleanNonces, 60 * 1000);
 
-
-async function sendAlert(problemType, license, userid, ip) {
-    console.log(`[ALERT] Type: ${problemType} | License: ${license} | UserId: ${userid} | IP: ${ip}`);
-    
-    if (!DISCORD_WEBHOOK_URL) return; // si pas de webhook défini, juste console.log
-    
-    try {
-        await fetch(DISCORD_WEBHOOK_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                username: "Roblox License Guard",
-                embeds: [{
-                    title: `⚠️ ${problemType}`,
-                    description: `Un problème a été détecté avec la license.`,
-                    color: 0xff5555,
-                    timestamp: new Date().toISOString(),
-                    fields: [
-                        { name: "License", value: license },
-                        { name: "UserId", value: String(userid) },
-                        { name: "IP", value: ip }
-                    ]
-                }]
-            })
-        });
-    } catch (err) {
-        console.error("Discord alert failed:", err);
-    }
-}
-
-
 // ==========================
 // HMAC (ROBLOX SAFE)
 // ==========================
@@ -170,17 +135,14 @@ if (!license || !userid || !timestamp || !nonce) {
 	);
 
 	if (!result.rows.length) {
-		sendAlert("unknown_license", license, userid, ip);
 		return res.status(404).json({ status: "invalid", reason: "unknown_license" });
 	}
-
 
 	const data = result.rows[0];
 	const nowMs = Date.now();
 
 	// Ban check
 	if (data.banned_until && data.banned_until > nowMs) {
-		sendAlert("banned_license_used", license, userid, ip);
 		return res.status(403).json({
 			status: "invalid",
 			reason: "banned",
@@ -200,14 +162,10 @@ if (!license || !userid || !timestamp || !nonce) {
 
 		return res.json({ status: "valid" });
 	}
-	if (!allowed.includes(uid)) {
-  	  sendAlert("unauthorized_user", license, userid, ip);
-	}
 
 	if (!unauthorized.includes(uid)) unauthorized.push(uid);
 
 	if (unauthorized.length >= MAX_UNAUTHORIZED_IDS) {
-		sendAlert("license_auto_banned", license, userid, ip);
 		await pool.query(
 			"UPDATE licenses SET unauthorized_attempts=$1, banned_until=$2 WHERE license=$3",
 			[JSON.stringify(unauthorized), nowMs + BAN_DURATION_MS, license]
