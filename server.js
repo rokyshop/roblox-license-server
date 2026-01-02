@@ -1,7 +1,7 @@
 import express from "express";
 import crypto from "crypto";
 import pkg from "pg";
-import fetch from "node-fetch";  // ← LIGNE IMPORTANTE
+import https from "https";  // ← Module natif Node.js
 
 const { Pool } = pkg;
 
@@ -30,26 +30,39 @@ const pool = new Pool({
 });
 
 // ==========================
-// FONCTION WEBHOOK DISCORD (AMÉLIORÉE)
+// FONCTION WEBHOOK DISCORD (HTTPS NATIF)
 // ==========================
-async function sendDiscordAlert(message) {
-	try {
-		console.log("📤 Envoi webhook Discord...");
-		const response = await fetch(DISCORD_WEBHOOK_URL, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ content: message })
-		});
-		
-		if (response.ok) {
+function sendDiscordAlert(message) {
+	const data = JSON.stringify({ content: message });
+	
+	const url = new URL(DISCORD_WEBHOOK_URL);
+	
+	const options = {
+		hostname: url.hostname,
+		path: url.pathname,
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			"Content-Length": data.length
+		}
+	};
+
+	console.log("📤 Envoi webhook Discord...");
+	
+	const req = https.request(options, (res) => {
+		if (res.statusCode === 204 || res.statusCode === 200) {
 			console.log("✅ Webhook Discord envoyé !");
 		} else {
-			const errorText = await response.text();
-			console.error("❌ Erreur webhook:", response.status, errorText);
+			console.error("❌ Erreur webhook:", res.statusCode);
 		}
-	} catch (error) {
+	});
+
+	req.on("error", (error) => {
 		console.error("❌ Erreur lors de l'envoi:", error.message);
-	}
+	});
+
+	req.write(data);
+	req.end();
 }
 
 // ==========================
@@ -184,7 +197,7 @@ app.post("/verify", async (req, res) => {
 
 	// 🚨 TENTATIVE NON AUTORISÉE - ALERTE DISCORD
 	console.log("⚠️ Tentative non autorisée détectée - envoi webhook...");
-	await sendDiscordAlert(`⚠️ **Tentative non autorisée**\n📝 License: \`${license}\`\n👤 UserID: \`${userid}\`\n🌐 IP: \`${ip}\``);
+	sendDiscordAlert(`⚠️ **Tentative non autorisée**\n📝 License: \`${license}\`\n👤 UserID: \`${userid}\`\n🌐 IP: \`${ip}\``);
 
 	if (!unauthorized.includes(uid)) unauthorized.push(uid);
 
@@ -196,7 +209,7 @@ app.post("/verify", async (req, res) => {
 
 		// 🚨 BAN - ALERTE DISCORD
 		console.log("🔴 License bannie - envoi webhook...");
-		await sendDiscordAlert(`🔴 **LICENSE BANNIE**\n📝 License: \`${license}\`\n⏰ Durée: 48h\n👥 IDs non autorisés: ${unauthorized.length}`);
+		sendDiscordAlert(`🔴 **LICENSE BANNIE**\n📝 License: \`${license}\`\n⏰ Durée: 48h\n👥 IDs non autorisés: ${unauthorized.length}`);
 
 		return res.status(403).json({
 			status: "invalid",
