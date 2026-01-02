@@ -147,14 +147,26 @@ app.post("/verify", async (req, res) => {
 		return res.status(400).json({ status: "invalid", reason: "missing_params" });
 	}
 
-	// Rate limit
 	if (!checkRateLimit(rateLimitIP, ip, RATE_LIMIT_MAX_PER_IP, RATE_LIMIT_WINDOW_MS)) {
-		return res.status(429).json({ status: "invalid", reason: "rate_limit_ip" });
+
+	    // 🔥 WEBHOOK : RATE LIMIT IP
+	    sendDiscordAlert(`🚫 Rate limit IP dépassé
+	🌐 IP: \`${ip}\``);
+
+	    return res.status(429).json({ status: "invalid", reason: "rate_limit_ip" });
 	}
 
+
 	if (!checkRateLimit(rateLimitLicense, license, RATE_LIMIT_MAX_PER_LICENSE, RATE_LIMIT_WINDOW_MS)) {
-		return res.status(429).json({ status: "invalid", reason: "rate_limit_license" });
+
+	    // 🔥 WEBHOOK : RATE LIMIT LICENSE
+	    sendDiscordAlert(`🚫 Rate limit license dépassé
+	📝 License: \`${license}\`
+	🌐 IP: \`${ip}\``);
+
+	    return res.status(429).json({ status: "invalid", reason: "rate_limit_license" });
 	}
+
 
 	// Timestamp
 	const now = Math.floor(Date.now() / 1000);
@@ -172,8 +184,15 @@ app.post("/verify", async (req, res) => {
 	// Anti replay
 	const nonceMap = recentNonces.get(license) || new Map();
 	if (nonceMap.has(nonce)) {
-		return res.status(401).json({ status: "invalid", reason: "replay" });
+
+  	  // 🔥 WEBHOOK : REPLAY ATTACK
+	  sendDiscordAlert(`🔁 Replay attack détectée
+	📝 License: \`${license}\`
+	👤 UserID: \`${userid}\`
+
+	    return res.status(401).json({ status: "invalid", reason: "replay" });
 	}
+
 	nonceMap.set(nonce, Date.now());
 	recentNonces.set(license, nonceMap);
 
@@ -186,9 +205,26 @@ app.post("/verify", async (req, res) => {
 	if (!result.rows.length) {
 
 	    // 🔥 WEBHOOK : LICENSE INCONNUE
-	    sendDiscordAlert(`❌ License inconnue
-	📝 License: \`${license}\`
-	👤 UserID: \`${userid}\`
+		sendDiscordAlert(
+	`🚨 **ALERTE SÉCURITÉ**
+	----------------------------------
+	📝 **License**: \`${license}\`
+	👤 **UserID**: \`${userid}\`
+	🌐 **IP**: \`${ip}\`
+
+	⏱️ **Timestamp reçu**: \`${timestamp}\`
+	⏱️ **Timestamp serveur**: \`${now}\`
+	📉 **Différence**: \`${Math.abs(now - Number(timestamp))} sec\`
+
+	🔑 **Nonce**: \`${nonce}\`
+
+	📌 **Tentatives non autorisées**: 0
+	📌 **Liste IDs non autorisés**: Aucun
+
+	⚠️ **Raison**: \`unknown_license\`
+	----------------------------------
+	`
+	);
 
   	  return res.status(404).json({ status: "invalid", reason: "unknown_license" });
 	}
