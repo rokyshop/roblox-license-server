@@ -21,7 +21,7 @@ const RATE_LIMIT_MAX_PER_LICENSE = 30;
 const RATE_LIMIT_MAX_PER_IP = 60;
 
 // 🔔 WEBHOOK DISCORD - METTEZ VOTRE URL ICI
-const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/VOTRE_WEBHOOK_ID/VOTRE_WEBHOOK_TOKEN";
+const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1456702388164493444/tIFr51HNNsJKzbxxxkvklNePVSWTubPYvy4A4LhN61T8hAtYndF70sUJTy2koWu9zHG_";
 
 // PostgreSQL (Render)
 const pool = new Pool({
