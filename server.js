@@ -137,149 +137,149 @@ function generateSignature(license, userid, timestamp, nonce) {
 // VERIFY
 // ==========================
 app.post("/verify", async (req, res) => {
-	const ip =
-		req.headers["x-forwarded-for"]?.split(",")[0] ||
-		req.socket.remoteAddress;
+    const ip =
+        req.headers["x-forwarded-for"]?.split(",")[0] ||
+        req.socket.remoteAddress;
 
-	const { license, userid, timestamp, nonce } = req.body;
+    const { license, userid, timestamp, nonce } = req.body;
 
-	if (!license || !userid || !timestamp || !nonce) {
-		return res.status(400).json({ status: "invalid", reason: "missing_params" });
-	}
+    if (!license || !userid || !timestamp || !nonce) {
+        return res.status(400).json({ status: "invalid", reason: "missing_params" });
+    }
 
-	if (!checkRateLimit(rateLimitIP, ip, RATE_LIMIT_MAX_PER_IP, RATE_LIMIT_WINDOW_MS)) {
+    // Rate limit IP
+    if (!checkRateLimit(rateLimitIP, ip, RATE_LIMIT_MAX_PER_IP, RATE_LIMIT_WINDOW_MS)) {
+        // 🔥 WEBHOOK : RATE LIMIT IP
+        sendDiscordAlert(`🚫 Rate limit IP dépassé
+🌐 IP: \`${ip}\``);
 
-	    // 🔥 WEBHOOK : RATE LIMIT IP
-	    sendDiscordAlert(`🚫 Rate limit IP dépassé
-	🌐 IP: \`${ip}\``);
+        return res.status(429).json({ status: "invalid", reason: "rate_limit_ip" });
+    }
 
-	    return res.status(429).json({ status: "invalid", reason: "rate_limit_ip" });
-	}
+    // Rate limit license
+    if (!checkRateLimit(rateLimitLicense, license, RATE_LIMIT_MAX_PER_LICENSE, RATE_LIMIT_WINDOW_MS)) {
+        // 🔥 WEBHOOK : RATE LIMIT LICENSE
+        sendDiscordAlert(`🚫 Rate limit license dépassé
+📝 License: \`${license}\`
+🌐 IP: \`${ip}\``);
 
+        return res.status(429).json({ status: "invalid", reason: "rate_limit_license" });
+    }
 
-	if (!checkRateLimit(rateLimitLicense, license, RATE_LIMIT_MAX_PER_LICENSE, RATE_LIMIT_WINDOW_MS)) {
-
-	    // 🔥 WEBHOOK : RATE LIMIT LICENSE
-	    sendDiscordAlert(`🚫 Rate limit license dépassé
-	📝 License: \`${license}\`
-	🌐 IP: \`${ip}\``);
-
-	    return res.status(429).json({ status: "invalid", reason: "rate_limit_license" });
-	}
-
-
-	// Timestamp
-	const now = Math.floor(Date.now() / 1000);
-	if (Math.abs(now - Number(timestamp)) > MAX_TIME_DRIFT_SEC) {
-
-	    // 🔥 WEBHOOK : TIMESTAMP EXPIRÉ
-	sendDiscordAlert(`⏰ Timestamp invalide / expiré
-	📝 License: \`${license}\`
-	👤 UserID: \`${userid}\`
-	🌐 IP: \`${ip}\`
-	`);
-
-		return res.status(401).json({ status: "invalid", reason: "expired" });
-
-	}
-
-
-	// Anti replay
-	const nonceMap = recentNonces.get(license) || new Map();
-	if (nonceMap.has(nonce)) {
-
-  	  // 🔥 WEBHOOK : REPLAY ATTACK
-	sendDiscordAlert(`🔁 Replay attack détectée
-	📝 License: \`${license}\`
-	👤 UserID: \`${userid}\`
-	🌐 IP: \`${ip}\`
-	`);
-
-	return res.status(401).json({ status: "invalid", reason: "replay" });
-
-
-	nonceMap.set(nonce, Date.now());
-	recentNonces.set(license, nonceMap);
-
-	// License lookup
-	const result = await pool.query(
-		"SELECT * FROM licenses WHERE license = $1",
-		[license]
-	);
-
-if (!result.rows.length) {
-
-    // 🔥 WEBHOOK : LICENSE INCONNUE
-    sendDiscordAlert(`❌ License inconnue
+    // Timestamp
+    const now = Math.floor(Date.now() / 1000);
+    if (Math.abs(now - Number(timestamp)) > MAX_TIME_DRIFT_SEC) {
+        // 🔥 WEBHOOK : TIMESTAMP EXPIRÉ
+        sendDiscordAlert(`⏰ Timestamp invalide / expiré
 📝 License: \`${license}\`
 👤 UserID: \`${userid}\`
+🌐 IP: \`${ip}\``);
 
-    return res.status(404).json({ status: "invalid", reason: "unknown_license" });
-}
+        return res.status(401).json({ status: "invalid", reason: "expired" });
+    }
 
+    // Anti replay
+    const nonceMap = recentNonces.get(license) || new Map();
+    if (nonceMap.has(nonce)) {
+        // 🔥 WEBHOOK : REPLAY ATTACK
+        sendDiscordAlert(`🔁 Replay attack détectée
+📝 License: \`${license}\`
+👤 UserID: \`${userid}\`
+🌐 IP: \`${ip}\``);
 
+        return res.status(401).json({ status: "invalid", reason: "replay" });
+    }
 
-	const data = result.rows[0];
-	const nowMs = Date.now();
+    nonceMap.set(nonce, Date.now());
+    recentNonces.set(license, nonceMap);
 
-	// Ban check
-	if (data.banned_until && data.banned_until > nowMs) {
-		return res.status(403).json({
-			status: "invalid",
-			reason: "banned",
-			until: data.banned_until
-		});
-	}
-
-	const allowed = JSON.parse(data.allowed_ids || "[]").map(Number);
-	const uid = Number(userid);
-	let unauthorized = JSON.parse(data.unauthorized_attempts || "[]");
-
-if (allowed.includes(uid)) {
-    await pool.query(
-        "UPDATE licenses SET last_used = $1 WHERE license = $2",
-        [Math.floor(nowMs / 1000), license]
+    // License lookup
+    const result = await pool.query(
+        "SELECT * FROM licenses WHERE license = $1",
+        [license]
     );
 
-   	 sendDiscordAlert(`🟢 License valide
-	📝 License: \`${license}\`
-	👤 UserID: \`${userid}\`
+    if (!result.rows.length) {
+        // 🔥 WEBHOOK : LICENSE INCONNUE
+        sendDiscordAlert(`❌ License inconnue
+📝 License: \`${license}\`
+👤 UserID: \`${userid}\`
+🌐 IP: \`${ip}\``);
 
- 	   return res.json({ status: "valid" });
-	}
+        return res.status(404).json({ status: "invalid", reason: "unknown_license" });
+    }
 
-	// 🚨 TENTATIVE NON AUTORISÉE - ALERTE DISCORD
-	console.log("⚠️ Tentative non autorisée détectée - envoi webhook...");
-	sendDiscordAlert(`⚠️ **Tentative non autorisée**\n📝 License: \`${license}\`\n👤 UserID: \`${userid}\`\n🌐 IP: \`${ip}\``);
+    const data = result.rows[0];
+    const nowMs = Date.now();
 
-	if (!unauthorized.includes(uid)) unauthorized.push(uid);
+    // Ban check
+    if (data.banned_until && data.banned_until > nowMs) {
+        // (tu peux aussi mettre un webhook ici si tu veux)
+        return res.status(403).json({
+            status: "invalid",
+            reason: "banned",
+            until: data.banned_until
+        });
+    }
 
-	if (unauthorized.length >= MAX_UNAUTHORIZED_IDS) {
-		await pool.query(
-			"UPDATE licenses SET unauthorized_attempts=$1, banned_until=$2 WHERE license=$3",
-			[JSON.stringify(unauthorized), nowMs + BAN_DURATION_MS, license]
-		);
+    const allowed = JSON.parse(data.allowed_ids || "[]").map(Number);
+    const uid = Number(userid);
+    let unauthorized = JSON.parse(data.unauthorized_attempts || "[]");
 
-		// 🚨 BAN - ALERTE DISCORD
-		console.log("🔴 License bannie - envoi webhook...");
-		sendDiscordAlert(`🔴 **LICENSE BANNIE**\n📝 License: \`${license}\`\n⏰ Durée: 48h\n👥 IDs non autorisés: ${unauthorized.length}`);
+    // ✅ LICENSE VALIDE
+    if (allowed.includes(uid)) {
+        await pool.query(
+            "UPDATE licenses SET last_used = $1 WHERE license = $2",
+            [Math.floor(nowMs / 1000), license]
+        );
 
-		return res.status(403).json({
-			status: "invalid",
-			reason: "banned_unauthorized"
-		});
-	}
+        sendDiscordAlert(`🟢 License valide
+📝 License: \`${license}\`
+👤 UserID: \`${userid}\`
+🌐 IP: \`${ip}\``);
 
-	await pool.query(
-		"UPDATE licenses SET unauthorized_attempts=$1 WHERE license=$2",
-		[JSON.stringify(unauthorized), license]
-	);
+        return res.json({ status: "valid" });
+    }
 
-	return res.status(403).json({
-		status: "invalid",
-		reason: "userid_not_allowed"
-	});
+    // 🚨 TENTATIVE NON AUTORISÉE
+    console.log("⚠️ Tentative non autorisée détectée - envoi webhook...");
+    sendDiscordAlert(`⚠️ **Tentative non autorisée**
+📝 License: \`${license}\`
+👤 UserID: \`${userid}\`
+🌐 IP: \`${ip}\``);
+
+    if (!unauthorized.includes(uid)) unauthorized.push(uid);
+
+    if (unauthorized.length >= MAX_UNAUTHORIZED_IDS) {
+        await pool.query(
+            "UPDATE licenses SET unauthorized_attempts=$1, banned_until=$2 WHERE license=$3",
+            [JSON.stringify(unauthorized), nowMs + BAN_DURATION_MS, license]
+        );
+
+        // 🚨 BAN - ALERTE DISCORD
+        console.log("🔴 License bannie - envoi webhook...");
+        sendDiscordAlert(`🔴 **LICENSE BANNIE**
+📝 License: \`${license}\`
+⏰ Durée: 48h
+👥 IDs non autorisés: ${unauthorized.length}`);
+
+        return res.status(403).json({
+            status: "invalid",
+            reason: "banned_unauthorized"
+        });
+    }
+
+    await pool.query(
+        "UPDATE licenses SET unauthorized_attempts=$1 WHERE license=$2",
+        [JSON.stringify(unauthorized), license]
+    );
+
+    return res.status(403).json({
+        status: "invalid",
+        reason: "userid_not_allowed"
+    });
 });
+
 
 // ==========================
 app.get("/health", (_, res) => res.json({ status: "ok" }));
