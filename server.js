@@ -150,19 +150,19 @@ app.post("/verify", async (req, res) => {
 
     function alert(reason, extra = "") {
         sendDiscordAlert(
-`🚨 **ALERTE — ${reason}**
+`🚨 **WARNING — ${reason}**
 ----------------------------------
 📝 License: \`${license}\`
 👤 UserID: \`${userid}\`
 🌐 IP: \`${ip}\`
 
-⏱️ Timestamp reçu: \`${timestamp}\`
-⏱️ Timestamp serveur: \`${now}\`
+⏱️ Timestamp received: \`${timestamp}\`
+⏱️ Timestamp server: \`${now}\`
 📉 Drift: \`${drift} sec\`
-📅 Date serveur: \`${nowDate}\`
+📅 Server Date: \`${nowDate}\`
 
 🔑 Nonce: \`${nonce}\`
-📦 Body reçu:
+📦 Body received:
 license=${license}
 userid=${userid}
 timestamp=${timestamp}
