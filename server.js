@@ -240,7 +240,7 @@ ${extra}
             [Math.floor(nowMs / 1000), license]
         );
 
-        alert("LICENSE_VALID");
+       // alert("LICENSE_VALID");
         return res.json({ status: "valid" });
     }
 
