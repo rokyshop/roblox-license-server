@@ -154,7 +154,6 @@ app.post("/verify", async (req, res) => {
 ----------------------------------
 📝 License: \`${license}\`
 👤 UserID: \`${userid}\`
-🌐 IP: \`${ip}\`
 
 ⏱️ Timestamp received: \`${timestamp}\`
 ⏱️ Timestamp server: \`${now}\`
