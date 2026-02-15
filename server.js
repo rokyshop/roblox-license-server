@@ -1,7 +1,7 @@
 import express from "express";
 import crypto from "crypto";
 import https from "https";
-
+import fs from "fs";
 const app = express();
 app.use(express.json());
 
@@ -24,21 +24,42 @@ const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/145671460006500784
 // ==========================
 const licenses = new Map();
 
-// Initialisation des données exemple (adapte selon tes besoins)
-licenses.set("AcETVk37f6sg0", {
-  allowed_ids: JSON.stringify([1745237976, 7522968393]),
-  last_used: null,
-  unauthorized_attempts: JSON.stringify([]),
-  banned_until: null
-});
+function loadLicensesFromFile() {
+  try {
+    const data = fs.readFileSync("licenses.txt", "utf8");
+    const sections = data.split(/\n\s*\n/); // Coupe le fichier par bloc (séparés par une ligne vide)
 
-licenses.set("AUTREKEY", {
-  allowed_ids: JSON.stringify([8336970636, 1]),
-  last_used: null,
-  unauthorized_attempts: JSON.stringify([]),
-  banned_until: null
-});
+    sections.forEach(section => {
+      const lines = section.split("\n").map(l => l.trim());
+      let currentLicense = null;
+      let allowedIds = [];
 
+      lines.forEach(line => {
+        if (line.startsWith("License:")) {
+          currentLicense = line.replace("License:", "").trim();
+        } else if (line.startsWith("UserID:")) {
+          const id = Number(line.replace("UserID:", "").trim());
+          if (!isNaN(id)) allowedIds.push(id);
+        }
+      });
+
+      if (currentLicense) {
+        licenses.set(currentLicense, {
+          allowed_ids: JSON.stringify(allowedIds),
+          last_used: null,
+          unauthorized_attempts: JSON.stringify([]),
+          banned_until: null
+        });
+        console.log(`✅ Chargée : ${currentLicense} (${allowedIds.length} IDs)`);
+      }
+    });
+  } catch (err) {
+    console.error("❌ Erreur lors de la lecture de licenses.txt:", err.message);
+  }
+}
+
+// Charger les licences au démarrage
+loadLicensesFromFile();
 // ==========================
 // FONCTION WEBHOOK DISCORD (CORRIGÉE)
 // ==========================
