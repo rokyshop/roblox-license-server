@@ -63,8 +63,9 @@ loadLicensesFromFile();
 // ==========================
 // FONCTION WEBHOOK DISCORD (CORRIGÉE)
 // ==========================
-function sendDiscordAlert(message) {
-  const data = JSON.stringify({ content: message });
+function sendDiscordAlert(embed) {
+  const data = JSON.stringify({ embeds: [embed] }); // On utilise "embeds" ici
+
   const url = new URL(DISCORD_WEBHOOK_URL);
   const options = {
     hostname: url.hostname,
@@ -75,25 +76,13 @@ function sendDiscordAlert(message) {
       "Content-Length": Buffer.byteLength(data)
     }
   };
-  console.log("📤 Envoi webhook Discord...");
-  console.log("🔍 URL:", url.hostname + url.pathname);
+
   const req = https.request(options, (res) => {
-    let responseData = "";
-    res.on("data", (chunk) => {
-      responseData += chunk;
-    });
-    res.on("end", () => {
-      if (res.statusCode === 204 || res.statusCode === 200) {
-        console.log("✅ Webhook Discord envoyé avec succès !");
-      } else {
-        console.error("❌ Erreur webhook:", res.statusCode);
-        console.error("Réponse:", responseData);
-      }
-    });
+    if (res.statusCode !== 204 && res.statusCode !== 200) {
+      console.error("❌ Erreur Discord:", res.statusCode);
+    }
   });
-  req.on("error", (error) => {
-    console.error("❌ Erreur lors de l'envoi:", error.message);
-  });
+  req.on("error", (err) => console.error("❌ Erreur envoi:", err.message));
   req.write(data);
   req.end();
 }
@@ -149,43 +138,36 @@ app.post("/verify", async (req, res) => {
   // ==========================
   // FONCTION ALERTE STYLE EMBED PRO
   // ==========================
-  function alert(reason, color = 16711680, extra = "") {
-    const embed = {
+function alert(reason, color = 16711680, extra = "") {
+    sendDiscordAlert({
       title: `💠 APEX SECURITY TERMINAL | ${reason}`,
       color: color,
       description: `**Priority Status:** ELEVATED\n**Action:** Client Request Processed`,
       fields: [
-        {
-          name: "👤 IDENTIFICATION",
-          value: `**User:** \`Roblox User\`\n**ID:** \`${userid || "N/A"}\`\n**License:** \`${license || "N/A"}\``,
-          inline: true
+        { 
+          name: "👤 IDENTIFICATION", 
+          value: `**ID:** \`${userid || "N/A"}\`\n**License:** \`${license || "N/A"}\``, 
+          inline: true 
         },
-        {
-          name: "⚖️ ENFORCEMENT",
-          value: `**Reason:** ${reason}\n**Drift:** ${drift}s`,
-          inline: true
+        { 
+          name: "⚖️ ENFORCEMENT", 
+          value: `**Reason:** ${reason}\n**Drift:** ${drift}s`, 
+          inline: true 
         },
-        {
-          name: "📡 FORENSIC EVIDENCE",
-          value: `\`\`\`\n>> Timestamp Recv: ${timestamp}\n>> Timestamp Serv: ${now}\n>> Nonce: ${nonce}\n\`\`\``,
-          inline: false
+        { 
+          name: "📡 FORENSIC EVIDENCE", 
+          value: `\`\`\`\n>> Nonce: ${nonce}\n>> Serv Time: ${now}\n\`\`\n`, 
+          inline: false 
         },
-        {
-          name: "📦 RAW BODY RECEIVED",
-          value: `\`\`\`\nlicense=${license}\nuserid=${userid}\ntimestamp=${timestamp}\nnonce=${nonce}\n${extra}\n\`\`\``,
-          inline: false
-        },
-        {
-          name: "🌐 ENVIRONMENT",
-          value: `**IP:** \`${ip}\`\n**Date:** \`${nowDate}\``,
-          inline: false
+        { 
+          name: "📦 RAW BODY RECEIVED", 
+          value: `\`\`\`\nlicense=${license}\nuserid=${userid}\ntimestamp=${timestamp}\nnonce=${nonce}\n${extra}\n\`\`\``, 
+          inline: false 
         }
       ],
       footer: { text: "Apex Intelligence Unit" },
       timestamp: new Date()
-    };
-
-    sendDiscordAlert(embed);
+    });
   }
 
   // ==========================
