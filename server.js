@@ -138,19 +138,15 @@ function generateSignature(license, userid, timestamp, nonce) {
     .digest("hex");
 }
 
-// ==========================
-// VERIFY
-// ==========================
 app.post("/verify", async (req, res) => {
-  const ip =
-    req.headers["x-forwarded-for"]?.split(",")[0] ||
-    req.socket.remoteAddress;
+  const ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress;
   const { license, userid, timestamp, nonce } = req.body;
   const now = Math.floor(Date.now() / 1000);
   const nowMs = Date.now();
   const drift = Math.abs(now - Number(timestamp));
   const nowDate = new Date().toISOString();
 
+  // Fonction d'alerte Discord complète (conservée comme l'originale)
   function alert(reason, extra = "") {
     sendDiscordAlert(
       `🚨 **WARNING — ${reason}**
@@ -172,30 +168,30 @@ ${extra}
     );
   }
 
+  // 1. Vérification des paramètres manquants
   if (!license || !userid || !timestamp || !nonce) {
     alert("MISSING_PARAMS");
     return res.status(400).json({ status: "invalid", reason: "missing_params" });
   }
 
-  // Rate limit IP
+  // 2. Rate Limit (IP & Licence)
   if (!checkRateLimit(rateLimitIP, ip, RATE_LIMIT_MAX_PER_IP, RATE_LIMIT_WINDOW_MS)) {
     alert("RATE_LIMIT_IP");
     return res.status(429).json({ status: "invalid", reason: "rate_limit_ip" });
   }
 
-  // Rate limit license
-  if (!checkRateLimit(rateLimitLicense, license, RATE_LIMIT_MAX_PER_LICENSE, RATE_LIMIT_WINDOW_MS)) {
+  // NOTE : Pour 100 personnes, j'ai augmenté virtuellement le seuil de la licence ici
+  if (!checkRateLimit(rateLimitLicense, license, 100, RATE_LIMIT_WINDOW_MS)) {
     alert("RATE_LIMIT_LICENSE");
     return res.status(429).json({ status: "invalid", reason: "rate_limit_license" });
   }
 
-  // Timestamp expiré
+  // 3. Sécurité (Drift & Replay)
   if (drift > MAX_TIME_DRIFT_SEC) {
     alert("TIMESTAMP_EXPIRED");
     return res.status(401).json({ status: "invalid", reason: "expired" });
   }
 
-  // Anti replay
   const nonceMap = recentNonces.get(license) || new Map();
   if (nonceMap.has(nonce)) {
     alert("REPLAY_ATTACK");
@@ -204,16 +200,15 @@ ${extra}
   nonceMap.set(nonce, Date.now());
   recentNonces.set(license, nonceMap);
 
-  // License lookup
+  // 4. Vérification de l'existence de la licence
   if (!licenses.has(license)) {
     alert("UNKNOWN_LICENSE");
     return res.status(404).json({ status: "invalid", reason: "unknown_license" });
   }
   const data = licenses.get(license);
 
-  // Ban check
+  // 5. Check Ban manuel (si tu décides d'en bannir une toi-même dans le fichier)
   if (data.banned_until && data.banned_until > nowMs) {
-    alert("LICENSE_BANNED", `⛔ Banned until: ${data.banned_until}`);
     return res.status(403).json({
       status: "invalid",
       reason: "banned",
@@ -223,34 +218,26 @@ ${extra}
 
   const allowed = JSON.parse(data.allowed_ids || "[]").map(Number);
   const uid = Number(userid);
-  let unauthorized = JSON.parse(data.unauthorized_attempts || "[]");
 
-  // LICENSE VALIDE
+  // ==========================
+  // LOGIQUE DE VALIDATION FINALE
+  // ==========================
   if (allowed.includes(uid)) {
+    // SUCCESS : L'utilisateur est dans la liste
     data.last_used = Math.floor(nowMs / 1000);
-    // alert("LICENSE_VALID");
     return res.json({ status: "valid" });
-  }
-
-  // TENTATIVE NON AUTORISÉE
-  alert("UNAUTHORIZED_USERID", `IDs non autorisés: ${unauthorized.join(", ")}`);
-  if (!unauthorized.includes(uid)) unauthorized.push(uid);
-  if (unauthorized.length >= MAX_UNAUTHORIZED_IDS) {
-    data.unauthorized_attempts = JSON.stringify(unauthorized);
-    data.banned_until = nowMs + BAN_DURATION_MS;
-    alert("AUTO_BAN", `IDs non autorisés: ${unauthorized.join(", ")}`);
+  } else {
+    // ÉCHEC : L'utilisateur n'est pas autorisé
+    // On envoie l'alerte pour que tu puisses l'ajouter si besoin
+    alert("UNAUTHORIZED_USERID", `L'utilisateur ${uid} n'est pas dans la liste des 100 autorisés.`);
+    
+    // On refuse l'accès SANS bannir la licence pour les 99 autres
     return res.status(403).json({
       status: "invalid",
-      reason: "banned_unauthorized"
+      reason: "userid_not_allowed"
     });
   }
-  data.unauthorized_attempts = JSON.stringify(unauthorized);
-  return res.status(403).json({
-    status: "invalid",
-    reason: "userid_not_allowed"
-  });
 });
-
 // ==========================
 app.get("/health", (_, res) => res.json({ status: "ok" }));
 
