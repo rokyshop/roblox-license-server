@@ -146,69 +146,95 @@ app.post("/verify", async (req, res) => {
   const drift = Math.abs(now - Number(timestamp));
   const nowDate = new Date().toISOString();
 
-  // Fonction d'alerte Discord complète (conservée comme l'originale)
-  function alert(reason, extra = "") {
-    sendDiscordAlert(
-      `🚨 **WARNING — ${reason}**
-----------------------------------
-📝 License: \`${license}\`
-👤 UserID: \`${userid}\`
-⏱️ Timestamp received: \`${timestamp}\`
-⏱️ Timestamp server: \`${now}\`
-📉 Drift: \`${drift} sec\`
-📅 Server Date: \`${nowDate}\`
-🔑 Nonce: \`${nonce}\`
-📦 Body received:
-license=${license}
-userid=${userid}
-timestamp=${timestamp}
-nonce=${nonce}
-${extra}
-----------------------------------`
-    );
+  // ==========================
+  // FONCTION ALERTE STYLE EMBED PRO
+  // ==========================
+  function alert(reason, color = 16711680, extra = "") {
+    const embed = {
+      title: `💠 APEX SECURITY TERMINAL | ${reason}`,
+      color: color,
+      description: `**Priority Status:** ELEVATED\n**Action:** Client Request Processed`,
+      fields: [
+        {
+          name: "👤 IDENTIFICATION",
+          value: `**User:** \`Roblox User\`\n**ID:** \`${userid || "N/A"}\`\n**License:** \`${license || "N/A"}\``,
+          inline: true
+        },
+        {
+          name: "⚖️ ENFORCEMENT",
+          value: `**Reason:** ${reason}\n**Drift:** ${drift}s`,
+          inline: true
+        },
+        {
+          name: "📡 FORENSIC EVIDENCE",
+          value: `\`\`\`\n>> Timestamp Recv: ${timestamp}\n>> Timestamp Serv: ${now}\n>> Nonce: ${nonce}\n\`\`\``,
+          inline: false
+        },
+        {
+          name: "📦 RAW BODY RECEIVED",
+          value: `\`\`\`\nlicense=${license}\nuserid=${userid}\ntimestamp=${timestamp}\nnonce=${nonce}\n${extra}\n\`\`\``,
+          inline: false
+        },
+        {
+          name: "🌐 ENVIRONMENT",
+          value: `**IP:** \`${ip}\`\n**Date:** \`${nowDate}\``,
+          inline: false
+        }
+      ],
+      footer: { text: "Apex Intelligence Unit" },
+      timestamp: new Date()
+    };
+
+    sendDiscordAlert(embed);
   }
 
-  // 1. Vérification des paramètres manquants
+  // ==========================
+  // DÉBUT DES VÉRIFICATIONS
+  // ==========================
+
+  // 1. Paramètres manquants
   if (!license || !userid || !timestamp || !nonce) {
-    alert("MISSING_PARAMS");
+    alert("MISSING_PARAMS", 16776960); // Jaune
     return res.status(400).json({ status: "invalid", reason: "missing_params" });
   }
 
-  // 2. Rate Limit (IP & Licence)
+  // 2. Rate Limit IP
   if (!checkRateLimit(rateLimitIP, ip, RATE_LIMIT_MAX_PER_IP, RATE_LIMIT_WINDOW_MS)) {
-    alert("RATE_LIMIT_IP");
+    alert("RATE_LIMIT_IP", 16753920); // Orange
     return res.status(429).json({ status: "invalid", reason: "rate_limit_ip" });
   }
 
-  // NOTE : Pour 100 personnes, j'ai augmenté virtuellement le seuil de la licence ici
+  // 3. Rate Limit License (Ajusté pour 100 personnes)
   if (!checkRateLimit(rateLimitLicense, license, 100, RATE_LIMIT_WINDOW_MS)) {
-    alert("RATE_LIMIT_LICENSE");
+    alert("RATE_LIMIT_LICENSE", 16753920);
     return res.status(429).json({ status: "invalid", reason: "rate_limit_license" });
   }
 
-  // 3. Sécurité (Drift & Replay)
+  // 4. Timestamp expiré
   if (drift > MAX_TIME_DRIFT_SEC) {
-    alert("TIMESTAMP_EXPIRED");
+    alert("TIMESTAMP_EXPIRED", 16711680); // Rouge
     return res.status(401).json({ status: "invalid", reason: "expired" });
   }
 
+  // 5. Anti replay
   const nonceMap = recentNonces.get(license) || new Map();
   if (nonceMap.has(nonce)) {
-    alert("REPLAY_ATTACK");
+    alert("REPLAY_ATTACK", 16711680);
     return res.status(401).json({ status: "invalid", reason: "replay" });
   }
   nonceMap.set(nonce, Date.now());
   recentNonces.set(license, nonceMap);
 
-  // 4. Vérification de l'existence de la licence
+  // 6. License lookup
   if (!licenses.has(license)) {
-    alert("UNKNOWN_LICENSE");
+    alert("UNKNOWN_LICENSE", 16711680);
     return res.status(404).json({ status: "invalid", reason: "unknown_license" });
   }
   const data = licenses.get(license);
 
-  // 5. Check Ban manuel (si tu décides d'en bannir une toi-même dans le fichier)
+  // 7. Check Ban manuel
   if (data.banned_until && data.banned_until > nowMs) {
+    alert("ATTEMPT_ON_BANNED_LICENSE", 0); // Noir
     return res.status(403).json({
       status: "invalid",
       reason: "banned",
@@ -219,19 +245,14 @@ ${extra}
   const allowed = JSON.parse(data.allowed_ids || "[]").map(Number);
   const uid = Number(userid);
 
-  // ==========================
-  // LOGIQUE DE VALIDATION FINALE
-  // ==========================
+  // 8. VÉRIFICATION FINALE (SANS AUTO-BAN)
   if (allowed.includes(uid)) {
-    // SUCCESS : L'utilisateur est dans la liste
     data.last_used = Math.floor(nowMs / 1000);
+    // On peut activer une alerte verte ici si on veut log les succès
     return res.json({ status: "valid" });
   } else {
-    // ÉCHEC : L'utilisateur n'est pas autorisé
-    // On envoie l'alerte pour que tu puisses l'ajouter si besoin
-    alert("UNAUTHORIZED_USERID", `L'utilisateur ${uid} n'est pas dans la liste des 100 autorisés.`);
-    
-    // On refuse l'accès SANS bannir la licence pour les 99 autres
+    // Échec mais pas de ban de la licence (important pour tes 100 users)
+    alert("UNAUTHORIZED_USERID", 16711680, `IDs autorisés sur cette clé: ${allowed.length} inscrits`);
     return res.status(403).json({
       status: "invalid",
       reason: "userid_not_allowed"
