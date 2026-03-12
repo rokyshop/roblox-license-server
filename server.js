@@ -58,9 +58,8 @@ const DISCORD_COOLDOWN_MS = 3000;
 function sendDiscordAlert(embed) {
   const now = Date.now();
   
-  // Skip if we are sending messages too fast
   if (now - lastDiscordNotification < DISCORD_COOLDOWN_MS) {
-    console.warn("⚠️ Discord Alert throttled to prevent 429 error.");
+    console.warn("⚠️ Discord Alert throttled");
     return;
   }
   
@@ -131,15 +130,14 @@ app.post("/verify", async (req, res) => {
   const drift = Math.abs(now - Number(timestamp));
   const nowDate = new Date().toISOString();
 
-// Inside app.post("/verify")
 function alert(reason, color = 16711680, extra = "") {
     sendDiscordAlert({
-      title: `💠 APEX SECURITY | ${reason}`,
+      title: ` ${reason}`,
       color: color,
       description: `**Status:** ACCESS_DENIED\n**Action:** Logged to Terminal`,
       fields: [
         { name: "👤 USER", value: `ID: \`${userid || "N/A"}\`\nLic: \`${license || "N/A"}\``, inline: true },
-        { name: "⚖️ ENFORCEMENT", value: `Reason: ${reason}`, inline: true }, // IP Removed from here
+        { name: "⚖️ ENFORCEMENT", value: `Reason: ${reason}`, inline: true }, 
         { name: "📦 TRACE", value: `\`\`\`\n${extra}\n\`\`\``, inline: false }
       ],
       footer: { text: "Apex Intelligence Unit" },
@@ -147,13 +145,11 @@ function alert(reason, color = 16711680, extra = "") {
     });
 }
 
-// 1. Silent check for missing params (No Discord message)
 if (!license || !userid || !timestamp || !nonce) {
     console.log(`[AUTH_FAIL] Missing params from request.`);
     return res.status(400).json({ status: "invalid", reason: "missing_params" });
 }
 
-// 2. Silent Rate Limit (No Discord message to prevent 429)
 if (!checkRateLimit(rateLimitIP, ip, RATE_LIMIT_MAX_PER_IP, RATE_LIMIT_WINDOW_MS)) {
     console.log(`[RATE_LIMIT] IP has been throttled.`);
     return res.status(429).json({ status: "invalid", reason: "rate_limit_ip" });
@@ -199,7 +195,7 @@ if (!checkRateLimit(rateLimitIP, ip, RATE_LIMIT_MAX_PER_IP, RATE_LIMIT_WINDOW_MS
     data.last_used = Math.floor(nowMs / 1000);
     return res.json({ status: "valid" });
   } else {
-    alert("UNAUTHORIZED_USERID", 16711680, `IDs autorisez on this keys: ${allowed.length} inscrits`);
+    alert("UNAUTHORIZED_USERID", 16711680, `IDs autorized on this keys: ${allowed.length} inscrits`);
     return res.status(403).json({
       status: "invalid",
       reason: "userid_not_allowed"
