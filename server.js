@@ -52,8 +52,21 @@ function loadLicensesFromFile() {
 
 loadLicensesFromFile();
 
+let lastDiscordNotification = 0;
+const DISCORD_COOLDOWN_MS = 3000; 
+
 function sendDiscordAlert(embed) {
-  const data = JSON.stringify({ embeds: [embed] }); 
+  const now = Date.now();
+  
+  // Skip if we are sending messages too fast
+  if (now - lastDiscordNotification < DISCORD_COOLDOWN_MS) {
+    console.warn("⚠️ Discord Alert throttled to prevent 429 error.");
+    return;
+  }
+  
+  lastDiscordNotification = now;
+
+  const data = JSON.stringify({ embeds: [embed] });
   const url = new URL(DISCORD_WEBHOOK_URL);
   const options = {
     hostname: url.hostname,
@@ -66,11 +79,12 @@ function sendDiscordAlert(embed) {
   };
 
   const req = https.request(options, (res) => {
-    if (res.statusCode !== 204 && res.statusCode !== 200) {
-      console.error("❌ Erreur Discord:", res.statusCode);
+    if (res.statusCode === 429) {
+      console.error("❌ Discord Rate Limit: 429");
     }
   });
-  req.on("error", (err) => console.error("❌ Erreur envoi:", err.message));
+
+  req.on("error", (err) => console.error("❌ Send Error:", err.message));
   req.write(data);
   req.end();
 }
@@ -117,48 +131,33 @@ app.post("/verify", async (req, res) => {
   const drift = Math.abs(now - Number(timestamp));
   const nowDate = new Date().toISOString();
 
+// Inside app.post("/verify")
 function alert(reason, color = 16711680, extra = "") {
     sendDiscordAlert({
-      title: `💠 APEX SECURITY TERMINAL | ${reason}`,
+      title: `💠 APEX SECURITY | ${reason}`,
       color: color,
-      description: `**Priority Status:** ELEVATED\n**Action:** Client Request Processed`,
+      description: `**Status:** ACCESS_DENIED\n**Action:** Logged to Terminal`,
       fields: [
-        { 
-          name: "👤 IDENTIFICATION", 
-          value: `**ID:** \`${userid || "N/A"}\`\n**License:** \`${license || "N/A"}\``, 
-          inline: true 
-        },
-        { 
-          name: "⚖️ ENFORCEMENT", 
-          value: `**Reason:** ${reason}\n**Drift:** ${drift}s`, 
-          inline: true 
-        },
-        { 
-          name: "📡 FORENSIC EVIDENCE", 
-          value: `\`\`\`\n>> Nonce: ${nonce}\n>> Serv Time: ${now}\n\`\`\n`, 
-          inline: false 
-        },
-        { 
-          name: "📦 RAW BODY RECEIVED", 
-          value: `\`\`\`\nlicense=${license}\nuserid=${userid}\ntimestamp=${timestamp}\nnonce=${nonce}\n${extra}\n\`\`\``, 
-          inline: false 
-        }
+        { name: "👤 USER", value: `ID: \`${userid || "N/A"}\`\nLic: \`${license || "N/A"}\``, inline: true },
+        { name: "⚖️ ENFORCEMENT", value: `Reason: ${reason}`, inline: true }, // IP Removed from here
+        { name: "📦 TRACE", value: `\`\`\`\n${extra}\n\`\`\``, inline: false }
       ],
       footer: { text: "Apex Intelligence Unit" },
       timestamp: new Date()
     });
-  }
+}
 
-
-  if (!license || !userid || !timestamp || !nonce) {
-    alert("MISSING_PARAMS", 16776960); 
+// 1. Silent check for missing params (No Discord message)
+if (!license || !userid || !timestamp || !nonce) {
+    console.log(`[AUTH_FAIL] Missing params from request.`);
     return res.status(400).json({ status: "invalid", reason: "missing_params" });
-  }
+}
 
-  if (!checkRateLimit(rateLimitIP, ip, RATE_LIMIT_MAX_PER_IP, RATE_LIMIT_WINDOW_MS)) {
-    alert("RATE_LIMIT_IP", 16753920); 
+// 2. Silent Rate Limit (No Discord message to prevent 429)
+if (!checkRateLimit(rateLimitIP, ip, RATE_LIMIT_MAX_PER_IP, RATE_LIMIT_WINDOW_MS)) {
+    console.log(`[RATE_LIMIT] IP has been throttled.`);
     return res.status(429).json({ status: "invalid", reason: "rate_limit_ip" });
-  }
+}
 
   if (!checkRateLimit(rateLimitLicense, license, 100, RATE_LIMIT_WINDOW_MS)) {
     alert("RATE_LIMIT_LICENSE", 16753920);
