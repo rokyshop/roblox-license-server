@@ -13,7 +13,7 @@ const RATE_LIMIT_MAX_PER_LICENSE = 30;
 const RATE_LIMIT_MAX_PER_IP = 60;
 
 // === Discord Webhook (passé en variable d'environnement pour la sécurité) ===
-const DISCORD_WEBHOOK_URL = env(DISCORD_WEBHOOK_URL) || "https://discord.com/api/webhooks/1456714600065007841/eMMvf0l-miTAYraRqZnmxhce4XE6KYZAfCYsHrx122FcV_H30I1iukJ2iSA40fXnvVd0"; // mets-le dans wrangler.toml ou secrets
+const DISCORD_WEBHOOK_URL = env("DISCORD_WEBHOOK_URL") || "https://discord.com/api/webhooks/1456714600065007841/eMMvf0l-miTAYraRqZnmxhce4XE6KYZAfCYsHrx122FcV_H30I1iukJ2iSA40fXnvVd0";
 
 // Stockage en mémoire (per-instance Worker)
 const licenses = new Map();
