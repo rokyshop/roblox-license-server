@@ -1,8 +1,5 @@
-License: AcETVk37f6sg0
-UserID: 1745237976
-UserID: 7522968393
-
-License: V3.2
+// import-licenses.js
+const licensesText = `License: V3.2
 UserID: 8336970636
 UserID: 1
 UserID: 7379719688
@@ -156,7 +153,40 @@ UserID: 1530732150
 UserID: 1103157571
 UserID: 4708828718
 UserID: 7446471260
-UserID: 3769060987
+UserID: 3769060987`;
+
+// Parsing du texte
+const lines = licensesText.split('\n').map(l => l.trim()).filter(l => l);
+
+const licenses = new Map(); // license → array of userIDs
+
+let currentLicense = null;
+
+for (const line of lines) {
+  if (line.startsWith('License:')) {
+    currentLicense = line.replace('License:', '').trim();
+    if (!licenses.has(currentLicense)) {
+      licenses.set(currentLicense, []);
+    }
+  } else if (line.startsWith('UserID:') && currentLicense) {
+    const id = line.replace('UserID:', '').trim();
+    if (id) {
+      licenses.get(currentLicense).push(id);
+    }
+  }
+}
+
+// Génère les INSERT
+let sql = '-- Import des licenses\n\n';
+
+for (const [license, userIds] of licenses.entries()) {
+  const allowedIdsJson = JSON.stringify(userIds.map(id => Number(id)));
+  
+  sql += `INSERT OR REPLACE INTO licenses (license, allowed_ids, last_used, attempts, banned_until)
+VALUES ('${license.replace(/'/g, "''")}', '${allowedIdsJson.replace(/'/g, "''")}', NULL, 0, NULL);\n\n`;
+}
+
+console.log(sql);
 
 
 
