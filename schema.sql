@@ -1,4 +1,4 @@
-CREATE TABLE licenses (
+CREATE TABLE IF NOT EXISTS licenses (
     license TEXT PRIMARY KEY,
     owner_id BIGINT,
     allowed_ids TEXT,
