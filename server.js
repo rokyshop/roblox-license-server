@@ -28,46 +28,57 @@ const DISCORD_COOLDOWN_MS = 3000;
 // Option 1 : depuis KV (recommandé pour production)
 // Option 2 : depuis une variable d'environnement JSON (plus simple pour débuter)
 
+import fs from 'node:fs';
+import path from 'node:path';
+
 async function loadLicenses() {
   try {
-    // Exemple avec KV (binding nommé "LICENSES_KV")
-    const kvData = await env.LICENSES_KV.get("licenses_data", "text");
-    if (!kvData) {
-      console.warn("⚠️ Aucune donnée de licenses trouvée dans KV");
-      return;
+    // Lis ton fichier licenses.txt
+    const filePath = path.resolve('./licenses.txt'); // place ton fichier à la racine
+    const kvData = fs.readFileSync(filePath, 'utf-8');
+
+    const lines = kvData.split('\n').map(l => l.trim()).filter(l => l);
+    let currentLicense = null;
+    let allowedIds = [];
+
+    for (const line of lines) {
+      if (line.startsWith('License:')) {
+        // Sauvegarde l'ancienne license avant de passer à la nouvelle
+        if (currentLicense && allowedIds.length) {
+          licenses.set(currentLicense, {
+            allowed_ids: JSON.stringify(allowedIds),
+            last_used: null,
+            unauthorized_attempts: JSON.stringify([]),
+            banned_until: null
+          });
+          console.log(`✅ Loaded : ${currentLicense} (${allowedIds.length} IDs)`);
+        }
+
+        currentLicense = line.replace('License:', '').trim();
+        allowedIds = [];
+      } else if (line.startsWith('UserID:') && currentLicense) {
+        const id = Number(line.replace('UserID:', '').trim());
+        if (!isNaN(id)) allowedIds.push(id);
+      }
     }
 
-    const sections = kvData.split(/\n\s*\n/);
-    sections.forEach(section => {
-      const lines = section.split("\n").map(l => l.trim());
-      let currentLicense = null;
-      let allowedIds = [];
-
-      lines.forEach(line => {
-        if (line.startsWith("License:")) {
-          currentLicense = line.replace("License:", "").trim();
-        } else if (line.startsWith("UserID:")) {
-          const id = Number(line.replace("UserID:", "").trim());
-          if (!isNaN(id)) allowedIds.push(id);
-        }
+    // Ajoute la dernière license
+    if (currentLicense && allowedIds.length) {
+      licenses.set(currentLicense, {
+        allowed_ids: JSON.stringify(allowedIds),
+        last_used: null,
+        unauthorized_attempts: JSON.stringify([]),
+        banned_until: null
       });
+      console.log(`✅ Loaded : ${currentLicense} (${allowedIds.length} IDs)`);
+    }
 
-      if (currentLicense) {
-        licenses.set(currentLicense, {
-          allowed_ids: JSON.stringify(allowedIds),
-          last_used: null,
-          unauthorized_attempts: JSON.stringify([]),
-          banned_until: null
-        });
-        console.log(`✅ Loaded : ${currentLicense} (${allowedIds.length} IDs)`);
-      }
-    });
   } catch (err) {
     console.error("❌ Error loading licenses:", err.message);
   }
 }
 
-// Charger au démarrage du Worker
+// Charger au démarrage
 loadLicenses();
 
 // Fonction d'alerte Discord
