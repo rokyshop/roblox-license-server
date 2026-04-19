@@ -13,7 +13,7 @@ const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_PER_LICENSE = 30;
 const RATE_LIMIT_MAX_PER_IP = 60;
 
-const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1495251729439133696/8zcPtNRO-XeShsah94N7DacuLY946CyH7ALAGQaW4gxltsLuBf_qdUV31lC2AOP9LNjq";
+const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1495254917156311110/AN6zdzF1e6wOPCfc9eVVzC4_FkFyfZb5cP1FnFyzkG8kG3EcfJet_kuwpgnKWZqHeFCx";
 
 const licenses = new Map();
 
