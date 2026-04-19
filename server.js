@@ -2,24 +2,26 @@ import express from "express";
 import crypto from "crypto";
 import https from "https";
 import fs from "fs";
+
 const app = express();
 app.use(express.json());
+
+// ============ CONFIG ============
 const SECRET_KEY = "rREd764dJYU7665dsfEF";
 const MAX_TIME_DRIFT_SEC = 300;
-const MAX_UNAUTHORIZED_IDS = 3;
-const BAN_DURATION_MS = 48 * 60 * 60 * 1000;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_PER_LICENSE = 30;
 const RATE_LIMIT_MAX_PER_IP = 60;
 
 const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1456702388164493444/tIFr51HNNsJKzbxxxkvklNePVSWTubPYvy4A4LhN61T8hAtYndF70sUJTy2koWu9zHG_";
 
+// ============ LICENSES ============
 const licenses = new Map();
 
 function loadLicensesFromFile() {
   try {
     const data = fs.readFileSync("licenses.txt", "utf8");
-    const sections = data.split(/\n\s*\n/); 
+    const sections = data.split(/\n\s*\n/);
 
     sections.forEach(section => {
       const lines = section.split("\n").map(l => l.trim());
@@ -52,21 +54,41 @@ function loadLicensesFromFile() {
 
 loadLicensesFromFile();
 
-let lastDiscordNotification = 0;
-const DISCORD_COOLDOWN_MS = 15000; 
+// ============ DISCORD QUEUE SYSTEM ============
+// File d'attente + dédoublonnage : évite de spammer Discord (plus de 429)
+const discordQueue = [];
+const recentAlerts = new Map(); // clé → timestamp du dernier envoi
+const DEDUP_WINDOW_MS = 30_000;   // Même alerte (license+raison) max 1x / 30s
+const QUEUE_INTERVAL_MS = 1500;   // Envoi max 1 message / 1.5s à Discord
+const MAX_QUEUE_SIZE = 50;        // Sécurité anti-explosion mémoire
 
-function sendDiscordAlert(embed) {
+function sendDiscordAlert(embed, dedupKey) {
   const now = Date.now();
-  
-  if (now - lastDiscordNotification < DISCORD_COOLDOWN_MS) {
-    console.warn("⚠️ Discord Alert throttled");
+
+  // 1) Dédoublonnage : si la même alerte a été envoyée récemment, on skip
+  if (dedupKey) {
+    const last = recentAlerts.get(dedupKey);
+    if (last && now - last < DEDUP_WINDOW_MS) {
+      return; // silencieusement ignoré, pas de log pour éviter le spam console
+    }
+    recentAlerts.set(dedupKey, now);
+  }
+
+  // 2) Sécurité : si la queue déborde, on drop
+  if (discordQueue.length >= MAX_QUEUE_SIZE) {
     return;
   }
-  
-  lastDiscordNotification = now;
 
-  const data = JSON.stringify({ embeds: [embed] });
+  discordQueue.push({ embed, attempts: 0 });
+}
+
+function processDiscordQueue() {
+  if (discordQueue.length === 0) return;
+
+  const item = discordQueue.shift();
+  const data = JSON.stringify({ embeds: [item.embed] });
   const url = new URL(DISCORD_WEBHOOK_URL);
+
   const options = {
     hostname: url.hostname,
     path: url.pathname + url.search,
@@ -79,7 +101,25 @@ function sendDiscordAlert(embed) {
 
   const req = https.request(options, (res) => {
     if (res.statusCode === 429) {
-      console.error("❌ Discord Rate Limit: 429");
+      // Lecture du retry_after pour respecter Discord
+      let body = "";
+      res.on("data", chunk => body += chunk);
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(body);
+          const retryAfter = (parsed.retry_after || 5) * 1000;
+          console.error(`❌ Discord 429 - retry dans ${retryAfter}ms`);
+          // On pause le traitement de la queue
+          if (item.attempts < 3) {
+            item.attempts++;
+            setTimeout(() => discordQueue.unshift(item), retryAfter);
+          }
+        } catch {
+          console.error("❌ Discord 429 - parse fail");
+        }
+      });
+    } else if (res.statusCode >= 400) {
+      console.error(`❌ Discord error: ${res.statusCode}`);
     }
   });
 
@@ -88,6 +128,18 @@ function sendDiscordAlert(embed) {
   req.end();
 }
 
+// Tick la queue toutes les 1.5s → max ~40 msg/min, Discord autorise 30/min/webhook
+setInterval(processDiscordQueue, QUEUE_INTERVAL_MS);
+
+// Nettoyage du dédoublonnage
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, ts] of recentAlerts.entries()) {
+    if (now - ts > DEDUP_WINDOW_MS * 2) recentAlerts.delete(key);
+  }
+}, 60_000);
+
+// ============ RATE LIMIT / NONCES ============
 const recentNonces = new Map();
 const rateLimitIP = new Map();
 const rateLimitLicense = new Map();
@@ -107,13 +159,27 @@ function checkRateLimit(map, key, max, windowMs) {
 function cleanNonces() {
   const now = Date.now();
   for (const [lic, nonces] of recentNonces.entries()) {
+    // On collecte les clés à supprimer AVANT de modifier la map
+    const toDelete = [];
     for (const [n, t] of nonces.entries()) {
-      if (now - t > MAX_TIME_DRIFT_SEC * 1000) nonces.delete(n);
+      if (now - t > MAX_TIME_DRIFT_SEC * 1000) toDelete.push(n);
     }
+    toDelete.forEach(n => nonces.delete(n));
     if (!nonces.size) recentNonces.delete(lic);
   }
 }
-setInterval(cleanNonces, 60 * 1000);
+setInterval(cleanNonces, 60_000);
+
+// Nettoyage rate limits (évite de faire grossir les maps à l'infini)
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of rateLimitIP.entries()) {
+    if (now - v.time > RATE_LIMIT_WINDOW_MS * 2) rateLimitIP.delete(k);
+  }
+  for (const [k, v] of rateLimitLicense.entries()) {
+    if (now - v.time > RATE_LIMIT_WINDOW_MS * 2) rateLimitLicense.delete(k);
+  }
+}, 120_000);
 
 function generateSignature(license, userid, timestamp, nonce) {
   return crypto
@@ -122,46 +188,50 @@ function generateSignature(license, userid, timestamp, nonce) {
     .digest("hex");
 }
 
+// ============ ENDPOINT ============
 app.post("/verify", async (req, res) => {
-  const ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress;
-  const { license, userid, timestamp, nonce } = req.body;
+  const ip = (req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress || "unknown").trim();
+  const { license, userid, timestamp, nonce } = req.body || {};
   const now = Math.floor(Date.now() / 1000);
   const nowMs = Date.now();
-  const drift = Math.abs(now - Number(timestamp));
-  const nowDate = new Date().toISOString();
 
-function alert(reason, color = 16711680, extra = "") {
+  function alert(reason, color = 16711680, extra = "") {
+    // Clé de dédoublonnage : même license + même raison = 1 alerte / 30s
+    const dedupKey = `${license || "none"}:${reason}`;
     sendDiscordAlert({
       title: ` ${reason}`,
       color: color,
       description: `**Status:** ACCESS_DENIED\n**Action:** Logged to Terminal`,
       fields: [
         { name: "👤 USER", value: `ID: \`${userid || "N/A"}\`\nLic: \`${license || "N/A"}\``, inline: true },
-        { name: "⚖️ ENFORCEMENT", value: `Reason: ${reason}`, inline: true }, 
-        { name: "📦 TRACE", value: `\`\`\`\n${extra}\n\`\`\``, inline: false }
+        { name: "⚖️ ENFORCEMENT", value: `Reason: ${reason}`, inline: true },
+        { name: "📦 TRACE", value: `\`\`\`\n${extra || "—"}\n\`\`\``, inline: false }
       ],
       footer: { text: "Apex Intelligence Unit" },
       timestamp: new Date()
-    });
-}
+    }, dedupKey);
+  }
 
-if (!license || !userid || !timestamp || !nonce) {
+  if (!license || !userid || !timestamp || !nonce) {
     console.log(`[AUTH_FAIL] Missing params from request.`);
     return res.status(400).json({ status: "invalid", reason: "missing_params" });
-}
+  }
 
-if (!checkRateLimit(rateLimitIP, ip, RATE_LIMIT_MAX_PER_IP, RATE_LIMIT_WINDOW_MS)) {
-    console.log(`[RATE_LIMIT] IP has been throttled.`);
+  // Rate limit IP (silencieux côté Discord pour pas spammer)
+  if (!checkRateLimit(rateLimitIP, ip, RATE_LIMIT_MAX_PER_IP, RATE_LIMIT_WINDOW_MS)) {
+    console.log(`[RATE_LIMIT_IP] ${ip} throttled.`);
     return res.status(429).json({ status: "invalid", reason: "rate_limit_ip" });
-}
+  }
 
-  if (!checkRateLimit(rateLimitLicense, license, 100, RATE_LIMIT_WINDOW_MS)) {
-    alert("RATE_LIMIT_LICENSE", 16753920);
+  // Rate limit License (silencieux aussi - sinon Discord explose quand quelqu'un spam)
+  if (!checkRateLimit(rateLimitLicense, license, RATE_LIMIT_MAX_PER_LICENSE, RATE_LIMIT_WINDOW_MS)) {
+    console.log(`[RATE_LIMIT_LICENSE] ${license} throttled.`);
     return res.status(429).json({ status: "invalid", reason: "rate_limit_license" });
   }
 
+  const drift = Math.abs(now - Number(timestamp));
   if (drift > MAX_TIME_DRIFT_SEC) {
-    alert("TIMESTAMP_EXPIRED", 16711680); 
+    alert("TIMESTAMP_EXPIRED", 16711680, `drift=${drift}s`);
     return res.status(401).json({ status: "invalid", reason: "expired" });
   }
 
@@ -180,7 +250,7 @@ if (!checkRateLimit(rateLimitIP, ip, RATE_LIMIT_MAX_PER_IP, RATE_LIMIT_WINDOW_MS
   const data = licenses.get(license);
 
   if (data.banned_until && data.banned_until > nowMs) {
-    alert("ATTEMPT_ON_BANNED_LICENSE", 0); 
+    alert("ATTEMPT_ON_BANNED_LICENSE", 0);
     return res.status(403).json({
       status: "invalid",
       reason: "banned",
@@ -195,13 +265,14 @@ if (!checkRateLimit(rateLimitIP, ip, RATE_LIMIT_MAX_PER_IP, RATE_LIMIT_WINDOW_MS
     data.last_used = Math.floor(nowMs / 1000);
     return res.json({ status: "valid" });
   } else {
-    alert("UNAUTHORIZED_USERID", 16711680, `IDs autorized on this keys: ${allowed.length} inscrits`);
+    alert("UNAUTHORIZED_USERID", 16711680, `IDs autorized on this key: ${allowed.length}`);
     return res.status(403).json({
       status: "invalid",
       reason: "userid_not_allowed"
     });
   }
 });
-app.get("/health", (_, res) => res.json({ status: "ok" }));
+
+app.get("/health", (_, res) => res.json({ status: "ok", queue: discordQueue.length }));
 
 app.listen(3000, () => console.log(" Server running on port 3000"));
