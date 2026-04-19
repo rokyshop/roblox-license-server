@@ -53,7 +53,7 @@ function loadLicensesFromFile() {
 loadLicensesFromFile();
 
 let lastDiscordNotification = 0;
-const DISCORD_COOLDOWN_MS = 3000; 
+const DISCORD_COOLDOWN_MS = 15000; 
 
 function sendDiscordAlert(embed) {
   const now = Date.now();
