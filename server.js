@@ -54,38 +54,41 @@ function loadLicensesFromFile() {
 
 loadLicensesFromFile();
 
-// ============ DISCORD QUEUE SYSTEM ============
-// File d'attente + dédoublonnage : évite de spammer Discord (plus de 429)
+// ============ DISCORD QUEUE ============
 const discordQueue = [];
-const recentAlerts = new Map(); // clé → timestamp du dernier envoi
-const DEDUP_WINDOW_MS = 30_000;   // Même alerte (license+raison) max 1x / 30s
-const QUEUE_INTERVAL_MS = 1500;   // Envoi max 1 message / 1.5s à Discord
-const MAX_QUEUE_SIZE = 50;        // Sécurité anti-explosion mémoire
+const recentAlerts = new Map();
+const DEDUP_WINDOW_MS = 60_000;
+const QUEUE_INTERVAL_MS = 2500;
+const MAX_QUEUE_SIZE = 20;
+const GLOBAL_BACKOFF_MAX_MS = 60_000;
+
+let globalBackoffUntil = 0;
 
 function sendDiscordAlert(embed, dedupKey) {
   const now = Date.now();
 
-  // 1) Dédoublonnage : si la même alerte a été envoyée récemment, on skip
+  if (now < globalBackoffUntil) return;
+
   if (dedupKey) {
     const last = recentAlerts.get(dedupKey);
-    if (last && now - last < DEDUP_WINDOW_MS) {
-      return; // silencieusement ignoré, pas de log pour éviter le spam console
-    }
+    if (last && now - last < DEDUP_WINDOW_MS) return;
     recentAlerts.set(dedupKey, now);
   }
 
-  // 2) Sécurité : si la queue déborde, on drop
-  if (discordQueue.length >= MAX_QUEUE_SIZE) {
-    return;
-  }
+  if (discordQueue.length >= MAX_QUEUE_SIZE) return;
 
-  discordQueue.push({ embed, attempts: 0 });
+  discordQueue.push({ embed, createdAt: now });
 }
 
 function processDiscordQueue() {
+  const now = Date.now();
+  if (now < globalBackoffUntil) return;
   if (discordQueue.length === 0) return;
 
   const item = discordQueue.shift();
+
+  if (now - item.createdAt > 120_000) return;
+
   const data = JSON.stringify({ embeds: [item.embed] });
   const url = new URL(DISCORD_WEBHOOK_URL);
 
@@ -95,49 +98,65 @@ function processDiscordQueue() {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Content-Length": Buffer.byteLength(data)
-    }
+      "Content-Length": Buffer.byteLength(data),
+      "User-Agent": "DiscordBot (licence-server, 1.0)"
+    },
+    timeout: 10_000
   };
 
   const req = https.request(options, (res) => {
-    if (res.statusCode === 429) {
-      // Lecture du retry_after pour respecter Discord
-      let body = "";
-      res.on("data", chunk => body += chunk);
-      res.on("end", () => {
+    let body = "";
+    res.on("data", chunk => body += chunk);
+    res.on("end", () => {
+      if (res.statusCode === 429) {
+        let retryAfterMs = 10_000;
+
+        const headerRetry = res.headers["retry-after"];
+        if (headerRetry) {
+          const v = parseFloat(headerRetry);
+          if (!isNaN(v)) retryAfterMs = Math.ceil(v * 1000);
+        }
+
         try {
           const parsed = JSON.parse(body);
-          const retryAfter = (parsed.retry_after || 5) * 1000;
-          console.error(`❌ Discord 429 - retry dans ${retryAfter}ms`);
-          // On pause le traitement de la queue
-          if (item.attempts < 3) {
-            item.attempts++;
-            setTimeout(() => discordQueue.unshift(item), retryAfter);
+          if (parsed.retry_after) {
+            retryAfterMs = Math.ceil(parsed.retry_after * 1000);
           }
         } catch {
-          console.error("❌ Discord 429 - parse fail");
+          if (!headerRetry) retryAfterMs = 30_000;
         }
-      });
-    } else if (res.statusCode >= 400) {
-      console.error(`❌ Discord error: ${res.statusCode}`);
-    }
+
+        retryAfterMs = Math.min(retryAfterMs, GLOBAL_BACKOFF_MAX_MS);
+        globalBackoffUntil = Date.now() + retryAfterMs;
+
+        console.error(`❌ Discord 429 - pause ${Math.round(retryAfterMs/1000)}s`);
+        return;
+      }
+
+      if (res.statusCode >= 400) {
+        console.error(`❌ Discord HTTP ${res.statusCode}: ${body.slice(0, 120)}`);
+      }
+    });
   });
 
-  req.on("error", (err) => console.error("❌ Send Error:", err.message));
+  req.on("error", (err) => console.error("❌ Discord send error:", err.message));
+  req.on("timeout", () => {
+    req.destroy();
+    console.error("❌ Discord timeout");
+  });
+
   req.write(data);
   req.end();
 }
 
-// Tick la queue toutes les 1.5s → max ~40 msg/min, Discord autorise 30/min/webhook
 setInterval(processDiscordQueue, QUEUE_INTERVAL_MS);
 
-// Nettoyage du dédoublonnage
 setInterval(() => {
   const now = Date.now();
   for (const [key, ts] of recentAlerts.entries()) {
     if (now - ts > DEDUP_WINDOW_MS * 2) recentAlerts.delete(key);
   }
-}, 60_000);
+}, 120_000);
 
 // ============ RATE LIMIT / NONCES ============
 const recentNonces = new Map();
@@ -159,7 +178,6 @@ function checkRateLimit(map, key, max, windowMs) {
 function cleanNonces() {
   const now = Date.now();
   for (const [lic, nonces] of recentNonces.entries()) {
-    // On collecte les clés à supprimer AVANT de modifier la map
     const toDelete = [];
     for (const [n, t] of nonces.entries()) {
       if (now - t > MAX_TIME_DRIFT_SEC * 1000) toDelete.push(n);
@@ -170,7 +188,6 @@ function cleanNonces() {
 }
 setInterval(cleanNonces, 60_000);
 
-// Nettoyage rate limits (évite de faire grossir les maps à l'infini)
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of rateLimitIP.entries()) {
@@ -181,13 +198,6 @@ setInterval(() => {
   }
 }, 120_000);
 
-function generateSignature(license, userid, timestamp, nonce) {
-  return crypto
-    .createHash("sha256")
-    .update(SECRET_KEY + `${license}${userid}${timestamp}${nonce}`)
-    .digest("hex");
-}
-
 // ============ ENDPOINT ============
 app.post("/verify", async (req, res) => {
   const ip = (req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress || "unknown").trim();
@@ -196,8 +206,7 @@ app.post("/verify", async (req, res) => {
   const nowMs = Date.now();
 
   function alert(reason, color = 16711680, extra = "") {
-    // Clé de dédoublonnage : même license + même raison = 1 alerte / 30s
-    const dedupKey = `${license || "none"}:${reason}`;
+    const dedupKey = `${license || "none"}:${reason}:${userid || "none"}`;
     sendDiscordAlert({
       title: ` ${reason}`,
       color: color,
@@ -213,19 +222,17 @@ app.post("/verify", async (req, res) => {
   }
 
   if (!license || !userid || !timestamp || !nonce) {
-    console.log(`[AUTH_FAIL] Missing params from request.`);
+    console.log(`[AUTH_FAIL] Missing params.`);
     return res.status(400).json({ status: "invalid", reason: "missing_params" });
   }
 
-  // Rate limit IP (silencieux côté Discord pour pas spammer)
   if (!checkRateLimit(rateLimitIP, ip, RATE_LIMIT_MAX_PER_IP, RATE_LIMIT_WINDOW_MS)) {
-    console.log(`[RATE_LIMIT_IP] ${ip} throttled.`);
+    console.log(`[RATE_LIMIT_IP] ${ip}`);
     return res.status(429).json({ status: "invalid", reason: "rate_limit_ip" });
   }
 
-  // Rate limit License (silencieux aussi - sinon Discord explose quand quelqu'un spam)
   if (!checkRateLimit(rateLimitLicense, license, RATE_LIMIT_MAX_PER_LICENSE, RATE_LIMIT_WINDOW_MS)) {
-    console.log(`[RATE_LIMIT_LICENSE] ${license} throttled.`);
+    console.log(`[RATE_LIMIT_LICENSE] ${license}`);
     return res.status(429).json({ status: "invalid", reason: "rate_limit_license" });
   }
 
@@ -265,7 +272,7 @@ app.post("/verify", async (req, res) => {
     data.last_used = Math.floor(nowMs / 1000);
     return res.json({ status: "valid" });
   } else {
-    alert("UNAUTHORIZED_USERID", 16711680, `IDs autorized on this key: ${allowed.length}`);
+    alert("UNAUTHORIZED_USERID", 16711680, `UserID ${uid} not in ${allowed.length} allowed IDs`);
     return res.status(403).json({
       status: "invalid",
       reason: "userid_not_allowed"
@@ -273,6 +280,25 @@ app.post("/verify", async (req, res) => {
   }
 });
 
-app.get("/health", (_, res) => res.json({ status: "ok", queue: discordQueue.length }));
+app.get("/health", (_, res) => res.json({
+  status: "ok",
+  queue: discordQueue.length,
+  backoff_ms: Math.max(0, globalBackoffUntil - Date.now())
+}));
+
+// Route de test — va sur https://ton-url.onrender.com/test-discord
+app.get("/test-discord", (_, res) => {
+  sendDiscordAlert({
+    title: "✅ Test Alert",
+    color: 3066993,
+    description: "Test manuel depuis /test-discord",
+    timestamp: new Date()
+  }, `test:${Date.now()}`);
+  res.json({
+    sent: true,
+    queue: discordQueue.length,
+    backoff_ms: Math.max(0, globalBackoffUntil - Date.now())
+  });
+});
 
 app.listen(3000, () => console.log(" Server running on port 3000"));
